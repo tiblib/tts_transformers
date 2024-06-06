@@ -49,10 +49,10 @@ class Phonemizer:
 
 
 class BioembModel:
-    HUGGING_FACE_TOKEN = "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"
     SR = 16000
 
-    def __init__(self, device):
+    def __init__(self, device, HUGGING_FACE_TOKEN):
+        self.HUGGING_FACE_TOKEN = HUGGING_FACE_TOKEN
         self.device = device
         self.speaker_embedder = Inference(
             model="pyannote/embedding",

@@ -10,6 +10,7 @@ except:
 
 LRELU_SLOPE = 0.1
 
+############# HifiGAN ##############
 
 class ResBlock1(torch.nn.Module):
     def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):

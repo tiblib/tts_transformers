@@ -82,10 +82,18 @@ class SubDecoder(nn.Module):
         device = embedding.device
         assert B == 1, "Batch size should be 1"
 
-        # Your code here
-        raise NotImplementedError("TODO: assignment")
-        # ^^^^^^^^^^^^^^
+        # Initialize the sequence with a zero tensor for the codes
+        codes_sequence = torch.zeros((B, 1, self.n_codebooks), dtype=torch.long, device=device)
 
+        for step in range(self.n_codebooks):
+            # Get the logits for the current sequence
+            logits = self.forward(embedding.unsqueeze(1), codes_sequence)[:, 0, step, :]
+            
+            # Sample the next token
+            next_token = sampling_fn(logits)
+            
+            # Append the sampled token to the sequence
+            codes_sequence[:, 0, step] = next_token
 
         return codes_sequence
 
@@ -227,7 +235,7 @@ class TTSTransformer(nn.Module):
         Method applies bioemb_linear, encoder, decoder and subdecoder.
         Works in teacher-forcing regime.
         """
-        # Bring speaker_embedding to the neededd size
+        # Bring speaker_embedding to the needed size
         speaker_embs = self.speaker_linear(speaker_embs)
 
         # Applying encoder and decoder, getting the codes representations for predictions of the next codes
@@ -248,6 +256,7 @@ class TTSTransformer(nn.Module):
     def autoregressive_sampling(
         self,
         phones, # [B, l]
+        phones_mask, # [B, l]
         speaker_embs, # [B]
         max_size: int = 1000,
         start_token: int = 161,
@@ -258,24 +267,49 @@ class TTSTransformer(nn.Module):
         phones: LongTensor of size [batch, phones_len]
         phones_mask: BoolTensor of size [batch, phones_len]
         speaker_embs: FloatTensor of size [batch, d_model]
-        max_size: int - the maximum number of steps in autoregressiong. Needed to avoid infinite inference if the end token does not generate.
+        max_size: int - the maximum number of steps in autoregression. Needed to avoid infinite inference if the end token does not generate.
         start_token: int - the start token index. The first codec vector in input codes sequence should be initialized with this value.
-        end_token: int - the end token index. If the model predicts this token ,
+        end_token: int - the end token index. If the model predicts this token, stop.
         sampling_fn: Callable FloatTensor of size [*, n_codes] -> LongTensor of size [*]
         
         The batch_size here is supposed to be 1.
         Implements the same idea as forward, but instead of ground-truth codecs uses codecs, predicted and sampled autoregressively.
         Makes either max_size steps of autoregression or stops when end_token is predicted.
         On each step of autoregression calls TTSTransformer.forward and SubDecoder.autoregressive_sampling.
-        As batch_size here allways equal to 1, the masks of phonemes and codecs are allways filled with ones here.
+        As batch_size here always equals 1, the masks of phonemes and codecs are always filled with ones here.
         """
         batch_size = phones.shape[0]
         assert batch_size == 1, "Batch size must be 1"
         device = phones.device
 
-        # Your code here
-        raise NotImplementedError("TODO: assignment")
-        # ^^^^^^^^^^^^^^
+        # Initialize the codes sequence with the start token
+        codes = torch.full((batch_size, 1, self.subdecoder.n_codebooks), start_token, dtype=torch.long, device=device)
 
+        # Process speaker embeddings
+        speaker_embs = self.speaker_linear(speaker_embs)
 
-        return codes
+        for step in range(max_size):
+            # Generate embeddings using the encoder-decoder
+            embeddings = self.encoder_decoder(
+                phones=phones,
+                phones_mask=phones_mask,
+                codes=codes,
+                codes_mask=torch.ones_like(codes[:, :, 0], dtype=torch.bool, device=device),
+                speaker_embs=speaker_embs
+            )
+            
+            # Use the subdecoder to autoregressively generate the next code
+            next_codes = self.subdecoder.autoregressive_sampling(embeddings[:, -1, :], sampling_fn=sampling_fn)
+
+          
+            # Ensure next_codes has the correct dimensions
+            next_codes = next_codes.view(batch_size, 1, self.subdecoder.n_codebooks)  # Shape: [1, 1, n_codebooks]
+
+            # Append the new codes to the existing sequence
+            codes = torch.cat([codes, next_codes], dim=1)  # Shape: [1, sequence_length, n_codebooks]
+
+            # Stop if end token is generated
+            if end_token in next_codes:
+                break
+
+        return codes[:, 1:]  # Exclude the start token from the output
